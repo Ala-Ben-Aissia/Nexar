@@ -5,8 +5,7 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 declare module 'node:http' {
   interface ServerResponse {
     status: (code: number) => this;
-    json: (body: unknown) => this;
-    send: (body: any) => this;
+    json: (body?: unknown) => this;
   }
 }
 
@@ -16,13 +15,16 @@ type Route = {
   handler: Handler;
 };
 
-type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => any;
+type Handler = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+) => void | Promise<void>;
 
 const proto = http.ServerResponse.prototype;
 
 proto.json = function (data: unknown) {
   this.setHeader('Content-Type', 'application/json; charset=utf-8');
-  this.end(JSON.stringify(data));
+  this.end(JSON.stringify(data ?? {}));
   return this;
 };
 
@@ -31,17 +33,13 @@ proto.status = function (code: number) {
   return this;
 };
 
-export class Nexar {
+export default class Nexar {
   private server: http.Server;
   private routes: Route[];
 
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
     this.routes = [];
-  }
-
-  private findRoute(pathname: string) {
-    return this.routes.find((r) => r.path === pathname);
   }
 
   private async handleRequest(
@@ -61,11 +59,16 @@ export class Nexar {
       );
     });
 
-    const route = this.findRoute(pathname);
+    const routesForPath = this.routes.filter(route => route.path === pathname);
+    const routeNotFound = routesForPath.length === 0;
+    if (routeNotFound) return res.status(404).json({ error: 'Not Found' });
 
-    if (!route) return res.status(404).json({ error: 'Not Found' });
-    if (route.method !== method)
+    const route = routesForPath.find(route => route.method === method);
+    if (!route) {
+      const allowedMethods = routesForPath.map(route => route.method);
+      res.setHeader('Allow', allowedMethods.join(', '));
       return res.status(405).json({ error: 'Method Not Allowed' });
+    }
 
     try {
       await route.handler(req, res);

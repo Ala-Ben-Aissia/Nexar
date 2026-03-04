@@ -1,7 +1,7 @@
 {
   "name": "nexar",
   "version": "0.0.1",
-  "description": "Lightweight, from-scratch Node.js HTTP server framework inspired by Express, but rebuilt with modern TypeScript practices.",
+  "description": "Lightweight, from-scratch Node.js HTTP server framework with modern TypeScript practices.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

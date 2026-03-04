@@ -12,10 +12,10 @@
     "declarationMap": true,
     "sourceMap": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./src/*"]
     }
   },
 
-  "include": ["src"],
+  "include": ["src", "playground"],
   "exclude": ["node_modules", "dist"]
 }
