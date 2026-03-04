@@ -1,0 +1,25 @@
+{
+  "name": "nexar",
+  "version": "0.0.1",
+  "description": "Lightweight, from-scratch Node.js HTTP server framework inspired by Express, but rebuilt with modern TypeScript practices.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "play": "tsx watch playground/app.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "picocolors": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
