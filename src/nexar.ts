@@ -5,26 +5,24 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 declare module 'node:http' {
   interface ServerResponse {
     status: (code: number) => this;
-    json: (body?: unknown) => this;
+    json: (body: unknown) => this;
   }
 }
 
-type Route = {
-  method: HttpMethod;
-  path: string;
-  handler: Handler;
-};
-
-type Handler = (
+type RouteHandler = (
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ) => void | Promise<void>;
+
+type MethodHandlerMap = Partial<Record<HttpMethod, RouteHandler>>;
+
+type PathRouter = Map<string, MethodHandlerMap>;
 
 const proto = http.ServerResponse.prototype;
 
 proto.json = function (data: unknown) {
   this.setHeader('Content-Type', 'application/json; charset=utf-8');
-  this.end(JSON.stringify(data ?? {}));
+  this.end(JSON.stringify(data));
   return this;
 };
 
@@ -35,11 +33,11 @@ proto.status = function (code: number) {
 
 export default class Nexar {
   private server: http.Server;
-  private routes: Route[];
+  private routes: PathRouter;
 
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
-    this.routes = [];
+    this.routes = new Map();
   }
 
   private async handleRequest(
@@ -59,47 +57,44 @@ export default class Nexar {
       );
     });
 
-    const routesForPath = this.routes.filter(route => route.path === pathname);
-    const routeNotFound = routesForPath.length === 0;
-    if (routeNotFound) return res.status(404).json({ error: 'Not Found' });
-
-    const route = routesForPath.find(route => route.method === method);
-    if (!route) {
-      const allowedMethods = routesForPath.map(route => route.method);
+    const route = this.routes.get(pathname);
+    if (!route) return res.status(404).json({ error: 'Not Found' });
+    if (!route[method]) {
+      const allowedMethods = Object.keys(route);
       res.setHeader('Allow', allowedMethods.join(', '));
       return res.status(405).json({ error: 'Method Not Allowed' });
     }
-
     try {
-      await route.handler(req, res);
+      await route[method]?.(req, res);
       if (!res.writableEnded) res.end();
     } catch (e) {
-      console.log(e);
+      if (e instanceof Error) console.log(e.message);
       if (!res.writableEnded) {
         res.status(500).json({ error: 'Internal Server Error' });
       }
     }
   }
 
-  private handleMethodCall(route: Route) {
-    this.routes.push(route);
+  private handleMethodCall(path: string, mapper: MethodHandlerMap) {
+    const existing = this.routes.get(path) ?? {};
+    this.routes.set(path, { ...existing, ...mapper });
     return this;
   }
 
-  get(path: string, handler: Handler) {
-    return this.handleMethodCall({ method: 'GET', path, handler });
+  get(path: string, handler: RouteHandler) {
+    return this.handleMethodCall(path, { GET: handler });
   }
-  post(path: string, handler: Handler) {
-    return this.handleMethodCall({ method: 'POST', path, handler });
+  post(path: string, handler: RouteHandler) {
+    return this.handleMethodCall(path, { POST: handler });
   }
-  patch(path: string, handler: Handler) {
-    return this.handleMethodCall({ method: 'PATCH', path, handler });
+  patch(path: string, handler: RouteHandler) {
+    return this.handleMethodCall(path, { PATCH: handler });
   }
-  put(path: string, handler: Handler) {
-    return this.handleMethodCall({ method: 'PUT', path, handler });
+  put(path: string, handler: RouteHandler) {
+    return this.handleMethodCall(path, { PUT: handler });
   }
-  delete(path: string, handler: Handler) {
-    return this.handleMethodCall({ method: 'DELETE', path, handler });
+  delete(path: string, handler: RouteHandler) {
+    return this.handleMethodCall(path, { DELETE: handler });
   }
 
   listen(port = 8000, host = '127.0.0.1', callback?: () => void) {

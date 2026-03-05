@@ -7,7 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "play": "tsx watch playground/app.ts",
+    "play": "tsx watch src/playground/app.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
