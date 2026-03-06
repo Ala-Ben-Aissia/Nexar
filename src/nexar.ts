@@ -5,7 +5,8 @@ import {
   safeWrite,
   validateJson,
   validateStatus,
-} from './utils.js';
+} from './utils/index.js';
+import { logger } from './utils/logger.js';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -37,20 +38,22 @@ function stringifyError(error: Error) {
 const proto: http.ServerResponse = http.ServerResponse.prototype;
 
 proto.json = function (input: unknown) {
-  if (!input) return this;
+  if (this.writableEnded) return this;
   this.setHeader('content-type', 'application/json');
+  if (!input) return this;
   const { error, data } = validateJson(input);
   if (error) {
-    console.log(error);
+    logger.error(error);
     return this.status(400).end(stringifyError(error));
   }
   safeWrite(this.req, this, data);
-  return this;
+  return this.end();
 };
 
 proto.status = function (code: number) {
   const { error } = validateStatus(code);
   if (error) {
+    logger.error(error);
     this.setHeader('content-type', 'application/json');
     this.statusCode = 400;
     return this.end(stringifyError(error));
@@ -72,7 +75,7 @@ proto.send = function (
       : JSON.stringify(input);
   if (!body) return this;
   safeWrite(this.req, this, body);
-  return this;
+  return this.end();
 };
 
 export default class Nexar {
@@ -96,9 +99,7 @@ export default class Nexar {
 
     res.on('finish', () => {
       const duration = performance.now() - startTime;
-      console.log(
-        `${method} ${pathname} ${res.statusCode} ${duration.toFixed()}ms`,
-      );
+      logger.request(method, pathname, res.statusCode, duration);
     });
 
     const route = this.routes.get(pathname);
@@ -113,7 +114,7 @@ export default class Nexar {
       await handler?.(req, res);
       if (!res.writableEnded) res.end();
     } catch (e) {
-      if (e instanceof Error) console.log(e.message);
+      logger.error(e);
       if (!res.writableEnded) {
         res.status(500).json({ error: 'Internal Server Error' });
       }

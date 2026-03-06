@@ -16,9 +16,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "dependencies": {
-    "picocolors": "^1.0.0"
-  },
   "engines": {
     "node": ">=20.0.0"
   }
