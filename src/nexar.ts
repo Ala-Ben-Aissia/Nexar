@@ -1,33 +1,77 @@
 import http from 'node:http';
+import {
+  ContentType,
+  detectContentType,
+  safeWrite,
+  validateJson,
+  validateStatus,
+} from './utils.js';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 declare module 'node:http' {
   interface ServerResponse {
     status: (code: number) => this;
-    json: (body: unknown) => this;
+    json: (input: unknown) => this;
+    send: (
+      input: unknown,
+      { contentType }?: { contentType: ContentType },
+    ) => this;
   }
 }
 
 type RouteHandler = (
   req: http.IncomingMessage,
   res: http.ServerResponse,
-) => void | Promise<void>;
+) => void | Promise<void> | http.ServerResponse;
 
 type MethodHandlerMap = Partial<Record<HttpMethod, RouteHandler>>;
 
 type PathRouter = Map<string, MethodHandlerMap>;
 
-const proto = http.ServerResponse.prototype;
+function stringifyError(error: Error) {
+  const { message, name, cause, stack } = error;
+  return JSON.stringify({ message, name, cause, stack });
+}
 
-proto.json = function (data: unknown) {
-  this.setHeader('Content-Type', 'application/json; charset=utf-8');
-  this.end(JSON.stringify(data));
+const proto: http.ServerResponse = http.ServerResponse.prototype;
+
+proto.json = function (input: unknown) {
+  if (!input) return this;
+  this.setHeader('content-type', 'application/json');
+  const { error, data } = validateJson(input);
+  if (error) {
+    console.log(error);
+    return this.status(400).end(stringifyError(error));
+  }
+  safeWrite(this.req, this, data);
   return this;
 };
 
 proto.status = function (code: number) {
+  const { error } = validateStatus(code);
+  if (error) {
+    this.setHeader('content-type', 'application/json');
+    this.statusCode = 400;
+    return this.end(stringifyError(error));
+  }
   this.statusCode = code;
+  return this;
+};
+
+proto.send = function (
+  input: any,
+  { contentType }: { contentType?: ContentType } = {},
+) {
+  if (!input) return this;
+  const type = detectContentType(input);
+  this.setHeader('content-type', contentType ?? type);
+  const body =
+    typeof input === 'string' || Buffer.isBuffer(input)
+      ? input
+      : JSON.stringify(input);
+  if (!body) return this;
+  safeWrite(this.req, this, body);
   return this;
 };
 
@@ -59,13 +103,14 @@ export default class Nexar {
 
     const route = this.routes.get(pathname);
     if (!route) return res.status(404).json({ error: 'Not Found' });
-    if (!route[method]) {
+    const handler = route[method];
+    if (!handler) {
       const allowedMethods = Object.keys(route);
       res.setHeader('Allow', allowedMethods.join(', '));
       return res.status(405).json({ error: 'Method Not Allowed' });
     }
     try {
-      await route[method]?.(req, res);
+      await handler?.(req, res);
       if (!res.writableEnded) res.end();
     } catch (e) {
       if (e instanceof Error) console.log(e.message);
