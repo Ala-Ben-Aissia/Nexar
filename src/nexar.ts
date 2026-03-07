@@ -1,34 +1,19 @@
 import http from 'node:http';
 import {
-  ContentType,
+  compilePath,
   detectContentType,
+  matchRoute,
   safeWrite,
   validateJson,
   validateStatus,
 } from './utils/index.js';
 import { logger } from './utils/logger.js';
-
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-
-declare module 'node:http' {
-  interface ServerResponse {
-    status: (code: number) => this;
-    json: (input: unknown) => this;
-    send: (
-      input: unknown,
-      { contentType }?: { contentType: ContentType },
-    ) => this;
-  }
-}
-
-type RouteHandler = (
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-) => void | Promise<void> | http.ServerResponse;
-
-type MethodHandlerMap = Partial<Record<HttpMethod, RouteHandler>>;
-
-type PathRouter = Map<string, MethodHandlerMap>;
+import type {
+  ContentType,
+  HttpMethod,
+  Route,
+  RouteHandler,
+} from './utils/types.js';
 
 function stringifyError(error: Error) {
   const { message, name, cause, stack } = error;
@@ -80,11 +65,11 @@ proto.send = function (
 
 export default class Nexar {
   private server: http.Server;
-  private routes: PathRouter;
+  private routes: Route[];
 
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
-    this.routes = new Map();
+    this.routes = [];
   }
 
   private async handleRequest(
@@ -102,14 +87,13 @@ export default class Nexar {
       logger.request(method, pathname, res.statusCode, duration);
     });
 
-    const route = this.routes.get(pathname);
-    if (!route) return res.status(404).json({ error: 'Not Found' });
-    const handler = route[method];
-    if (!handler) {
-      const allowedMethods = Object.keys(route);
-      res.setHeader('Allow', allowedMethods.join(', '));
-      return res.status(405).json({ error: 'Method Not Allowed' });
+    const match = matchRoute(pathname, this.routes, method);
+    if (!match.success) {
+      return res.status(match.code).json({ error: match.error });
     }
+    req.params = match.params;
+    const handler = match.route.handler;
+
     try {
       await handler?.(req, res);
       if (!res.writableEnded) res.end();
@@ -121,26 +105,60 @@ export default class Nexar {
     }
   }
 
-  private handleMethodCall(path: string, mapper: MethodHandlerMap) {
-    const existing = this.routes.get(path) ?? {};
-    this.routes.set(path, { ...existing, ...mapper });
+  get(path: string, handler: RouteHandler) {
+    const { regex, paramNames } = compilePath(path);
+    this.routes.push({
+      method: 'GET',
+      pattern: path,
+      regex,
+      paramNames,
+      handler,
+    });
     return this;
   }
-
-  get(path: string, handler: RouteHandler) {
-    return this.handleMethodCall(path, { GET: handler });
-  }
   post(path: string, handler: RouteHandler) {
-    return this.handleMethodCall(path, { POST: handler });
+    const { regex, paramNames } = compilePath(path);
+    this.routes.push({
+      method: 'POST',
+      pattern: path,
+      regex,
+      paramNames,
+      handler,
+    });
+    return this;
   }
   patch(path: string, handler: RouteHandler) {
-    return this.handleMethodCall(path, { PATCH: handler });
+    const { regex, paramNames } = compilePath(path);
+    this.routes.push({
+      method: 'PATCH',
+      pattern: path,
+      regex,
+      paramNames,
+      handler,
+    });
+    return this;
   }
   put(path: string, handler: RouteHandler) {
-    return this.handleMethodCall(path, { PUT: handler });
+    const { regex, paramNames } = compilePath(path);
+    this.routes.push({
+      method: 'PUT',
+      pattern: path,
+      regex,
+      paramNames,
+      handler,
+    });
+    return this;
   }
   delete(path: string, handler: RouteHandler) {
-    return this.handleMethodCall(path, { DELETE: handler });
+    const { regex, paramNames } = compilePath(path);
+    this.routes.push({
+      method: 'DELETE',
+      pattern: path,
+      regex,
+      paramNames,
+      handler,
+    });
+    return this;
   }
 
   listen(port = 8000, host = '127.0.0.1', callback?: () => void) {

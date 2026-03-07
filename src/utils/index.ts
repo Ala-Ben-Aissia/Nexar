@@ -1,4 +1,5 @@
 import type { Readable, Writable } from 'node:stream';
+import type { HttpMethod, Route } from './types.js';
 
 export function safeWrite(
   readable: Readable,
@@ -10,18 +11,6 @@ export function safeWrite(
     writable.on('drain', () => readable.resume());
   }
 }
-
-export type ContentType =
-  | 'text/plain'
-  | 'text/html'
-  | 'text/css'
-  | 'image/jpeg'
-  | 'image/png'
-  | 'image/gif'
-  | 'image/webp'
-  | 'image/svg+xml'
-  | 'application/json'
-  | 'application/octet-stream';
 
 const HTML_RE =
   /^\s*(?:<!doctype\s+html|<html[\s>]|<[a-z][\w-]*(?:\s[^>]*)?>)/i;
@@ -115,4 +104,56 @@ export function validateJson(input: unknown) {
   } catch (e) {
     return { error: e instanceof Error ? e : new TypeError(String(e)) };
   }
+}
+
+export function compilePath(path: string) {
+  const paramNames: string[] = [];
+  const regexStr = path
+    .replace(/:([^/]+)/g, (_, name) => {
+      paramNames.push(name);
+      return '([^/]+)';
+    })
+    .replace(/\//g, '\\/');
+  return { regex: new RegExp(`^${regexStr}\\/?$`), paramNames };
+}
+
+type MatchSuccess = {
+  success: true;
+  route: Route;
+  params: Record<string, string>;
+};
+
+type MatchError = {
+  success: false;
+  error: string;
+  code: number;
+};
+
+type MatchResult = MatchSuccess | MatchError;
+
+export function matchRoute(
+  pathname: string,
+  routes: Route[],
+  method: HttpMethod,
+): MatchResult {
+  let methodMismatch = false;
+
+  for (const route of routes) {
+    const match = pathname.match(route.regex);
+    if (!match) continue;
+
+    if (route.method !== method) {
+      methodMismatch = true;
+      continue;
+    }
+
+    const params = Object.fromEntries(
+      route.paramNames.map((name, i) => [name, match[i + 1]]),
+    );
+    return { success: true, route, params };
+  }
+
+  return methodMismatch
+    ? { success: false, error: 'Method Not Allowed', code: 405 }
+    : { success: false, error: 'Not Found', code: 404 };
 }
