@@ -80,7 +80,7 @@ export default class Nexar {
     const startTime = performance.now();
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    req.query = url.searchParams;
+    req.query = Object.fromEntries(url.searchParams);
     const pathname = url.pathname;
     const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
 
