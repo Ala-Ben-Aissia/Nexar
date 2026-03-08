@@ -106,8 +106,8 @@ export function validateJson(input: unknown) {
   }
 }
 
-export function compilePath(path: string) {
-  const paramNames: string[] = [];
+export function compilePath<Params extends string = never>(path: string) {
+  const paramNames: Params[] = [];
   const regexStr = path
     .replace(/:([^/]+)/g, (_, name) => {
       paramNames.push(name);

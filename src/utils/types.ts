@@ -9,8 +9,8 @@ declare module 'node:http' {
       { contentType }?: { contentType: ContentType },
     ) => this;
   }
-  interface IncomingMessage {
-    params: Record<string, string>;
+  interface IncomingMessage<Params extends string = never> {
+    params: Record<Params, string>;
   }
 }
 
@@ -28,17 +28,29 @@ export type ContentType =
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-export type RouteHandler = (
-  req: http.IncomingMessage,
+export type RouteHandler<Params extends string = never> = (
+  req: http.IncomingMessage &
+    ([Params] extends [never]
+      ? { params: never }
+      : { params: Record<Params, string> }),
   res: http.ServerResponse,
 ) => void | Promise<void> | http.ServerResponse;
 
-export type MethodHandlerMap = Partial<Record<HttpMethod, RouteHandler>>;
+export type MethodHandlerMap<Params extends string> = Partial<
+  Record<HttpMethod, RouteHandler<Params>>
+>;
 
-export type Route = {
+export type Route<Path extends string = string> = {
   method: HttpMethod;
-  pattern: string; // '/users/:id'
+  pattern: Path; // '/users/:id'
   regex: RegExp; // /^\/users\/([^/]+)\/?$/
   paramNames: string[]; // ['id']
-  handler: RouteHandler;
+  handler: RouteHandler<any>;
 };
+
+export type ExtractParams<Path extends string> =
+  Path extends `${string}:${infer Param}/${infer Rest}`
+    ? Param | ExtractParams<`/${Rest}`>
+    : Path extends `${string}:${infer Param}`
+      ? Param
+      : never;

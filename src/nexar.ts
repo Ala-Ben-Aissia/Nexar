@@ -10,6 +10,7 @@ import {
 import { logger } from './utils/logger.js';
 import type {
   ContentType,
+  ExtractParams,
   HttpMethod,
   Route,
   RouteHandler,
@@ -93,7 +94,6 @@ export default class Nexar {
     }
     req.params = match.params;
     const handler = match.route.handler;
-
     try {
       await handler?.(req, res);
       if (!res.writableEnded) res.end();
@@ -105,8 +105,12 @@ export default class Nexar {
     }
   }
 
-  private pushRoute(path: string, method: HttpMethod, handler: RouteHandler) {
-    const { regex, paramNames } = compilePath(path);
+  private pushRoute<Params extends string>(
+    path: string,
+    method: HttpMethod,
+    handler: RouteHandler<Params>,
+  ) {
+    const { regex, paramNames } = compilePath<Params>(path);
     this.routes.push({
       method,
       pattern: path,
@@ -116,23 +120,38 @@ export default class Nexar {
     });
   }
 
-  get(path: string, handler: RouteHandler) {
-    this.pushRoute(path, 'GET', handler);
+  get<Path extends string>(
+    path: Path,
+    handler: RouteHandler<ExtractParams<Path>>,
+  ) {
+    this.pushRoute<ExtractParams<Path>>(path, 'GET', handler);
     return this;
   }
-  post(path: string, handler: RouteHandler) {
+  post<Path extends string>(
+    path: Path,
+    handler: RouteHandler<ExtractParams<Path>>,
+  ) {
     this.pushRoute(path, 'POST', handler);
     return this;
   }
-  patch(path: string, handler: RouteHandler) {
+  patch<Path extends string>(
+    path: Path,
+    handler: RouteHandler<ExtractParams<Path>>,
+  ) {
     this.pushRoute(path, 'PATCH', handler);
     return this;
   }
-  put(path: string, handler: RouteHandler) {
+  put<Path extends string>(
+    path: Path,
+    handler: RouteHandler<ExtractParams<Path>>,
+  ) {
     this.pushRoute(path, 'PUT', handler);
     return this;
   }
-  delete(path: string, handler: RouteHandler) {
+  delete<Path extends string>(
+    path: Path,
+    handler: RouteHandler<ExtractParams<Path>>,
+  ) {
     this.pushRoute(path, 'DELETE', handler);
     return this;
   }
