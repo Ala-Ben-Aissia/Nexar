@@ -1,20 +1,5 @@
 import http from 'node:http';
 
-declare module 'node:http' {
-  interface ServerResponse {
-    status: (code: number) => this;
-    json: (input: unknown) => this;
-    send: (
-      input: unknown,
-      { contentType }?: { contentType: ContentType },
-    ) => this;
-  }
-  interface IncomingMessage<Params extends string = never> {
-    params: Record<Params, string>;
-    query: Record<string, string>;
-  }
-}
-
 export type ContentType =
   | 'text/plain'
   | 'text/html'
@@ -27,19 +12,40 @@ export type ContentType =
   | 'application/json'
   | 'application/octet-stream';
 
+export type BodyPayload =
+  | Record<string, unknown> // application/json
+  | Record<string, string> // application/x-www-form-urlencoded
+  | string // text/*
+  | Buffer; // binary / unknown
+
+declare module 'node:http' {
+  interface IncomingMessage {
+    params: Record<string, string>;
+    query: Record<string, string>;
+    body: BodyPayload;
+  }
+  interface ServerResponse {
+    status: (code: number) => this;
+    json: (input: unknown) => this;
+    send: (input: unknown) => this;
+  }
+}
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-export type RouteHandler<Params extends string = never> = (
+export type RouteHandler<
+  Params extends string = never,
+  Method extends HttpMethod = HttpMethod,
+> = (
   req: http.IncomingMessage &
     ([Params] extends [never]
       ? { params: never }
-      : { params: Record<Params, string> }),
+      : { params: Record<Params, string> }) &
+    ([Method] extends ['GET' | 'DELETE']
+      ? { body: never }
+      : { body: BodyPayload }),
   res: http.ServerResponse,
 ) => void | Promise<void> | http.ServerResponse;
-
-export type MethodHandlerMap<Params extends string> = Partial<
-  Record<HttpMethod, RouteHandler<Params>>
->;
 
 export type Route<Path extends string = string> = {
   method: HttpMethod;
