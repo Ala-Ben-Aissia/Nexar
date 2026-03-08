@@ -1,3 +1,4 @@
+import http from 'node:http';
 import type { Readable, Writable } from 'node:stream';
 import type { HttpMethod, Route } from './types.js';
 
@@ -43,7 +44,7 @@ function sniffImageMagicBytes(bytes: Uint8Array) {
   return null;
 }
 
-export function detectContentType(input: unknown) {
+export function detectContentType(input: unknown, req?: http.IncomingMessage) {
   // ── Binary buffers ────────────────────────────────────────────────────────
   if (input instanceof ArrayBuffer || input instanceof Uint8Array) {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
@@ -63,17 +64,17 @@ export function detectContentType(input: unknown) {
   if (typeof input === 'string') {
     if (HTML_RE.test(input)) return 'text/html';
     if (CSS_RE.test(input)) return 'text/css';
-
-    // SVG is XML/text — check before falling back to plain text
     if (input.trimStart().startsWith('<svg')) return 'image/svg+xml';
   }
 
-  // ── Json ───────────────────────────────────────────────────────────────
-  if (typeof input === 'object' && typeof input !== null) {
+  // ── Object → JSON ─────────────────────────────────────────────────────────
+  if (input !== null && typeof input === 'object') {
     return 'application/json';
   }
 
-  return 'text/plain';
+  // ── Fallback: trust request header, otherwise plain text ──────────────────
+  const fromHeader = req?.headers['content-type']?.split(';')[0]?.trim();
+  return fromHeader ?? 'text/plain';
 }
 
 export function validateStatus(code: number) {

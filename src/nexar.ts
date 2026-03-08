@@ -50,8 +50,8 @@ proto.status = function (code: number) {
 
 proto.send = function (input: any) {
   if (!input) return this;
-  const type = detectContentType(input);
-  this.setHeader('content-type', this.req.headers['content-type'] ?? type);
+  const type = detectContentType(input, this.req);
+  this.setHeader('content-type', type);
   const body =
     typeof input === 'string' || Buffer.isBuffer(input)
       ? input
