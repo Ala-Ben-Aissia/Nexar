@@ -11,6 +11,7 @@ declare module 'node:http' {
   }
   interface IncomingMessage<Params extends string = never> {
     params: Record<Params, string>;
+    query: URL['searchParams'];
   }
 }
 
