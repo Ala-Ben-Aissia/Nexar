@@ -105,59 +105,35 @@ export default class Nexar {
     }
   }
 
-  get(path: string, handler: RouteHandler) {
+  private pushRoute(path: string, method: HttpMethod, handler: RouteHandler) {
     const { regex, paramNames } = compilePath(path);
     this.routes.push({
-      method: 'GET',
+      method,
       pattern: path,
       regex,
       paramNames,
       handler,
     });
+  }
+
+  get(path: string, handler: RouteHandler) {
+    this.pushRoute(path, 'GET', handler);
     return this;
   }
   post(path: string, handler: RouteHandler) {
-    const { regex, paramNames } = compilePath(path);
-    this.routes.push({
-      method: 'POST',
-      pattern: path,
-      regex,
-      paramNames,
-      handler,
-    });
+    this.pushRoute(path, 'POST', handler);
     return this;
   }
   patch(path: string, handler: RouteHandler) {
-    const { regex, paramNames } = compilePath(path);
-    this.routes.push({
-      method: 'PATCH',
-      pattern: path,
-      regex,
-      paramNames,
-      handler,
-    });
+    this.pushRoute(path, 'PATCH', handler);
     return this;
   }
   put(path: string, handler: RouteHandler) {
-    const { regex, paramNames } = compilePath(path);
-    this.routes.push({
-      method: 'PUT',
-      pattern: path,
-      regex,
-      paramNames,
-      handler,
-    });
+    this.pushRoute(path, 'PUT', handler);
     return this;
   }
   delete(path: string, handler: RouteHandler) {
-    const { regex, paramNames } = compilePath(path);
-    this.routes.push({
-      method: 'DELETE',
-      pattern: path,
-      regex,
-      paramNames,
-      handler,
-    });
+    this.pushRoute(path, 'DELETE', handler);
     return this;
   }
 
