@@ -26,7 +26,7 @@ const proto: http.ServerResponse = http.ServerResponse.prototype;
 proto.json = function (input: unknown) {
   if (this.writableEnded) return this;
   this.setHeader('content-type', 'application/json');
-  if (!input) return this;
+  if (input === undefined) return this.end();
   const { error, data } = validateJson(input);
   if (error) {
     logger.error(error);
@@ -73,7 +73,7 @@ export default class Nexar {
   private parseBody(req: http.IncomingMessage) {
     return new Promise<BodyPayload>((resolve, reject) => {
       const chunks: Buffer[] = [];
-      req.on('data', chunk => chunks.push(chunk));
+      req.on('data', (chunk) => chunks.push(chunk));
       req.on('end', () => {
         const raw = Buffer.concat(chunks);
         const contentType = req.headers['content-type'] ?? '';
@@ -96,7 +96,7 @@ export default class Nexar {
         return resolve(raw);
       });
 
-      req.on('error', err => {
+      req.on('error', (err) => {
         logger.error(err);
         reject(err);
       });
