@@ -1,17 +1,5 @@
 import http from 'node:http';
 
-export type ContentType =
-  | 'text/plain'
-  | 'text/html'
-  | 'text/css'
-  | 'image/jpeg'
-  | 'image/png'
-  | 'image/gif'
-  | 'image/webp'
-  | 'image/svg+xml'
-  | 'application/json'
-  | 'application/octet-stream';
-
 export type BodyPayload =
   | Record<string, unknown> // application/json
   | Record<string, string> // application/x-www-form-urlencoded

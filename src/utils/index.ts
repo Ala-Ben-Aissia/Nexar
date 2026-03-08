@@ -17,10 +17,12 @@ const HTML_RE =
   /^\s*(?:<!doctype\s+html|<html[\s>]|<[a-z][\w-]*(?:\s[^>]*)?>)/i;
 const CSS_RE = /^\s*([.#:@*a-z][\w\s,>~+:.[\]()="'-]*\{[\s\S]*?\})/i;
 
-// JPEG: FF D8 FF — PNG: 89 50 4E 47 — GIF: 47 49 46 — WEBP: 52 49 46 46…57 45 42 50
-function sniffImageMagicBytes(bytes: Uint8Array) {
+function sniffImageMagicBytes(bytes: Buffer | Uint8Array) {
+  // JPEG: FF D8 FF
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
     return 'image/jpeg';
+
+  // PNG: 89 50 4E 47
   if (
     bytes[0] === 0x89 &&
     bytes[1] === 0x50 &&
@@ -28,8 +30,12 @@ function sniffImageMagicBytes(bytes: Uint8Array) {
     bytes[3] === 0x47
   )
     return 'image/png';
+
+  // GIF: 47 49 46
   if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46)
     return 'image/gif';
+
+  // WEBP: 52 49 46 46 ?? ?? ?? ?? 57 45 42 50
   if (
     bytes[0] === 0x52 &&
     bytes[1] === 0x49 &&
@@ -41,6 +47,39 @@ function sniffImageMagicBytes(bytes: Uint8Array) {
     bytes[11] === 0x50
   )
     return 'image/webp';
+
+  // BMP: 42 4D
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return 'image/bmp';
+
+  // TIFF: 49 49 2A 00 (little-endian) or 4D 4D 00 2A (big-endian)
+  if (
+    (bytes[0] === 0x49 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x2a &&
+      bytes[3] === 0x00) ||
+    (bytes[0] === 0x4d &&
+      bytes[1] === 0x4d &&
+      bytes[2] === 0x00 &&
+      bytes[3] === 0x2a)
+  )
+    return 'image/tiff';
+
+  // ISOBMFF container (AVIF, HEIC, HEIF) — check 'ftyp' box at offset 4
+  // offset 4-7 must be 'ftyp': 66 74 79 70
+  if (
+    bytes.length >= 12 &&
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70
+  ) {
+    // major brand at offset 8-11
+    const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+    if (brand === 'avif' || brand === 'avis') return 'image/avif';
+    if (brand === 'heic' || brand === 'heix') return 'image/heic';
+    if (brand === 'heif' || brand === 'mif1') return 'image/heif';
+  }
+
   return null;
 }
 
