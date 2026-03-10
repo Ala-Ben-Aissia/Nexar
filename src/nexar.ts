@@ -10,6 +10,7 @@ import {
 import { logger } from './utils/logger.js';
 import {
   BodyPayload,
+  Middleware,
   type ExtractParams,
   type HttpMethod,
   type Route,
@@ -66,10 +67,12 @@ proto.send = function (input: any) {
 export default class Nexar {
   private server: http.Server;
   private routes: Route[];
+  private middlewares: Middleware[];
 
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
     this.routes = [];
+    this.middlewares = [];
   }
 
   private parseBody(req: http.IncomingMessage) {
@@ -105,17 +108,55 @@ export default class Nexar {
     });
   }
 
+  private async runMiddlewares(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) {
+    let i = 0;
+    const next = async () => {
+      if (res.writableEnded) return;
+      if (i < this.middlewares.length) {
+        const mw = this.middlewares[i++];
+        await mw(req, res, next);
+      }
+    };
+    await next();
+  }
+
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ) {
     const startTime = performance.now();
 
+    try {
+      await this.runMiddlewares(req, res);
+    } catch (e) {
+      logger.error(e);
+      if (!res.writableEnded) {
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+      return;
+    }
+    if (res.writableEnded) return;
+
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     req.query = Object.fromEntries(url.searchParams);
-    req.body = await this.parseBody(req);
+
     const pathname = url.pathname;
     const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
+
+    if (!['GET', 'DELETE'].includes(method)) {
+      try {
+        req.body = await this.parseBody(req);
+      } catch (e) {
+        logger.error(e);
+        if (!res.writableEnded) {
+          res.status(400).json({ error: 'Invalid request body' });
+        }
+        return;
+      }
+    }
 
     res.on('finish', () => {
       const duration = performance.now() - startTime;
@@ -123,11 +164,15 @@ export default class Nexar {
     });
 
     const match = matchRoute(pathname, this.routes, method);
+
     if (!match.success) {
       return res.status(match.code).json({ error: match.error });
     }
+
     req.params = match.params;
+
     const handler = match.route.handler;
+
     try {
       await handler(req, res);
       if (!res.writableEnded) res.end();
@@ -137,6 +182,11 @@ export default class Nexar {
         res.status(500).json({ error: 'Internal Server Error' });
       }
     }
+  }
+
+  use(mw: Middleware) {
+    this.middlewares.push(mw);
+    return this;
   }
 
   private pushRoute<Params extends string>(

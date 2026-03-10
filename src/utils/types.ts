@@ -49,3 +49,9 @@ export type ExtractParams<Path extends string> =
     : Path extends `${string}:${infer Param}`
       ? Param
       : never;
+
+export type Middleware = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  next: () => void | Promise<void>,
+) => void | Promise<void>;
