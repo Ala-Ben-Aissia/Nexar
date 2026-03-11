@@ -20,7 +20,14 @@ declare module 'node:http' {
   }
 }
 
-export type HttpMethod = 'HEAD' | 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type HttpMethod =
+  | 'HEAD'
+  | 'OPTIONS'
+  | 'GET'
+  | 'POST'
+  | 'PUT'
+  | 'PATCH'
+  | 'DELETE';
 
 export type RouteHandler<
   Params extends string = never,

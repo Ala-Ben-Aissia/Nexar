@@ -29,7 +29,7 @@ const proto: http.ServerResponse = http.ServerResponse.prototype;
 
 proto.json = function (input: unknown) {
   if (this.writableEnded) return this;
-  this.setHeader('content-type', 'application/json');
+  this.setHeader('content-type', 'application/json; charset=utf-8');
   if (input === undefined) return this.end();
   const { error, data } = validateJson(input);
   if (error) {
@@ -44,8 +44,8 @@ proto.status = function (code: number) {
   const { error } = validateStatus(code);
   if (error) {
     logger.error(error);
-    this.setHeader('content-type', 'application/json');
     this.statusCode = 400;
+    this.setHeader('content-type', 'application/json; charset=utf-8');
     return this.end(stringifyError(error));
   }
   this.statusCode = code;
@@ -54,16 +54,25 @@ proto.status = function (code: number) {
 
 proto.send = function (input: any) {
   if (input === undefined) return this;
+  if (this.writableEnded) return this;
+
   if (!this.getHeader('content-type')) {
-    // detect from output shape — trust request header as fallback for untagged binary
     const type = detectContentType(input, this.req);
     this.setHeader('content-type', type);
   }
+
   const body =
-    typeof input === 'string' || Buffer.isBuffer(input)
-      ? input
-      : JSON.stringify(input);
-  if (!body) return this;
+    input instanceof ArrayBuffer
+      ? Buffer.from(input)
+      : input instanceof Uint8Array
+        ? Buffer.from(input.buffer, input.byteOffset, input.byteLength)
+        : typeof input === 'string' || Buffer.isBuffer(input)
+          ? input
+          : JSON.stringify(input);
+
+  const length = Buffer.byteLength(body);
+  this.setHeader('content-length', length);
+  if (this.req.method === 'HEAD') return this.end();
   safeWrite(this.req, this, body);
   return this.end();
 };
@@ -80,10 +89,24 @@ export default class Nexar {
   }
 
   private parseBody(req: http.IncomingMessage) {
+    const MAX_BODY = 1_000_000; // 1MB
+    let size = 0;
     return new Promise<BodyPayload>((resolve, reject) => {
+      let resolved = false;
       const chunks: Buffer[] = [];
-      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY) {
+          return reject(new NexarError(413, 'Payload too large'));
+        }
+        chunks.push(chunk);
+      });
+      req.on('close', () => {
+        if (!resolved && req.readableAborted)
+          return reject(new NexarError(400, 'Request aborted'));
+      });
       req.on('end', () => {
+        resolved = true;
         const raw = Buffer.concat(chunks);
         const contentType = req.headers['content-type'] ?? '';
         if (contentType.includes('application/json')) {
@@ -150,7 +173,8 @@ export default class Nexar {
     const startTime = performance.now();
 
     const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
-    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    const host = req.headers.host ?? 'localhost';
+    const url = new URL(req.url ?? '/', `http://${host}`);
     const pathname = url.pathname;
 
     req.query = Object.fromEntries(url.searchParams);
@@ -161,11 +185,15 @@ export default class Nexar {
     });
 
     // global middleware
+    let stack: RouteHandler[] = [];
+
+    for (const mw of this.middlewares) {
+      if (pathname.startsWith(mw.prefix)) {
+        stack.push(mw.handler);
+      }
+    }
     try {
-      const middlewares = this.middlewares
-        .filter((m) => pathname.startsWith(m.prefix))
-        .map((m) => m.handler);
-      await this.runStack(req, res, middlewares);
+      await this.runStack(req, res, stack);
     } catch (e) {
       this.handleError(e, req, res);
       return;
@@ -182,7 +210,14 @@ export default class Nexar {
       }
     }
 
-    const match = matchRoute(pathname, this.routes, method);
+    if (method === 'OPTIONS') {
+      res.setHeader('allow', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      return res.status(204).end();
+    }
+
+    const matchMethod = method === 'HEAD' ? 'GET' : method;
+
+    const match = matchRoute(pathname, this.routes, matchMethod);
     if (!match.success) {
       return res.status(match.code).json({ error: match.error });
     }
@@ -200,13 +235,14 @@ export default class Nexar {
 
   use(handler: Middleware): this;
   use(prefix: `/${string}`, handler: Middleware): this;
-  use(
-    pathOrHandler: `/${string}` | Middleware,
-    handler: Middleware = () => {},
-  ) {
+  use(pathOrHandler: `/${string}` | Middleware, handler?: Middleware) {
     if (typeof pathOrHandler === 'function') {
       this.middlewares.push({ prefix: '/', handler: pathOrHandler });
     } else {
+      if (!handler)
+        throw new TypeError(
+          'use() requires a handler when a prefix is provided',
+        );
       this.middlewares.push({ prefix: pathOrHandler, handler });
     }
     return this;
