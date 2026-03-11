@@ -109,20 +109,17 @@ export default class Nexar {
     });
   }
 
-  private async runMiddlewares(
+  private async runStack(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    pathname: string,
+    stack: Array<RouteHandler<any>>,
   ) {
     let i = 0;
-    const matched = this.middlewares.filter((mw) =>
-      pathname.startsWith(mw.prefix),
-    );
     const next = async () => {
       if (res.writableEnded) return;
-      if (i < matched.length) {
-        const mw = matched[i++];
-        await mw.handler(req, res, next);
+      if (i < stack.length) {
+        const middleware = stack[i++];
+        await middleware(req, res, next);
       }
     };
     await next();
@@ -140,7 +137,11 @@ export default class Nexar {
     const pathname = url.pathname;
 
     try {
-      await this.runMiddlewares(req, res, pathname);
+      // global middlewares
+      const middlewares = this.middlewares
+        .filter((m) => pathname.startsWith(m.prefix))
+        .map((m) => m.handler);
+      await this.runStack(req, res, middlewares);
     } catch (e) {
       logger.error(e);
       if (!res.writableEnded) {
@@ -177,10 +178,11 @@ export default class Nexar {
 
     req.params = match.params;
 
-    const handler = match.route.handler;
+    const handlers = match.route.handlers;
 
     try {
-      await handler(req, res);
+      // per-route handlers
+      await this.runStack(req, res, handlers);
       if (!res.writableEnded) res.end();
     } catch (e) {
       logger.error(e);
@@ -207,7 +209,7 @@ export default class Nexar {
   private pushRoute<Params extends string>(
     path: string,
     method: HttpMethod,
-    handler: RouteHandler<Params>,
+    handlers: RouteHandler<Params>[],
   ) {
     const { regex, paramNames } = compilePath<Params>(path);
     this.routes.push({
@@ -215,43 +217,43 @@ export default class Nexar {
       pattern: path,
       regex,
       paramNames,
-      handler,
+      handlers,
     });
   }
 
   get<Path extends string>(
     path: Path,
-    handler: RouteHandler<ExtractParams<Path>, 'GET'>,
+    ...handlers: Array<RouteHandler<ExtractParams<Path>, 'GET'>>
   ) {
-    this.pushRoute<ExtractParams<Path>>(path, 'GET', handler);
+    this.pushRoute<ExtractParams<Path>>(path, 'GET', handlers);
     return this;
   }
   post<Path extends string>(
     path: Path,
-    handler: RouteHandler<ExtractParams<Path>, 'POST'>,
+    ...handlers: Array<RouteHandler<ExtractParams<Path>, 'POST'>>
   ) {
-    this.pushRoute(path, 'POST', handler);
+    this.pushRoute<ExtractParams<Path>>(path, 'POST', handlers);
     return this;
   }
   patch<Path extends string>(
     path: Path,
-    handler: RouteHandler<ExtractParams<Path>, 'PATCH'>,
+    ...handlers: Array<RouteHandler<ExtractParams<Path>, 'PATCH'>>
   ) {
-    this.pushRoute(path, 'PATCH', handler);
+    this.pushRoute<ExtractParams<Path>>(path, 'PATCH', handlers);
     return this;
   }
   put<Path extends string>(
     path: Path,
-    handler: RouteHandler<ExtractParams<Path>, 'PUT'>,
+    ...handlers: Array<RouteHandler<ExtractParams<Path>, 'PUT'>>
   ) {
-    this.pushRoute(path, 'PUT', handler);
+    this.pushRoute<ExtractParams<Path>>(path, 'PUT', handlers);
     return this;
   }
   delete<Path extends string>(
     path: Path,
-    handler: RouteHandler<ExtractParams<Path>, 'DELETE'>,
+    ...handlers: Array<RouteHandler<ExtractParams<Path>, 'DELETE'>>
   ) {
-    this.pushRoute(path, 'DELETE', handler);
+    this.pushRoute<ExtractParams<Path>>(path, 'DELETE', handlers);
     return this;
   }
 

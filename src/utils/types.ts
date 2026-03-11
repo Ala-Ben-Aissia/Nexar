@@ -33,6 +33,7 @@ export type RouteHandler<
       ? { body: never }
       : { body: BodyPayload }),
   res: http.ServerResponse,
+  next: () => void | Promise<void>,
 ) => void | Promise<void> | http.ServerResponse;
 
 export type Route<Path extends string = string> = {
@@ -40,7 +41,7 @@ export type Route<Path extends string = string> = {
   pattern: Path; // '/users/:id'
   regex: RegExp; // /^\/users\/([^/]+)\/?$/
   paramNames: string[]; // ['id']
-  handler: RouteHandler<any>;
+  handlers: Array<RouteHandler<any>>;
 };
 
 export type ExtractParams<Path extends string> =
