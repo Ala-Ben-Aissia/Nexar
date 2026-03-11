@@ -73,13 +73,6 @@ export default class Nexar {
   private routes: Route[];
   private middlewares: MiddlewareStack;
 
-  private errorHandler: ErrorHandler = (err, _req, res) => {
-    const status = err instanceof NexarError ? err.status : 500;
-    const message =
-      err instanceof NexarError ? err.message : 'Internal Server Error';
-    if (!res.writableEnded) res.status(status).json({ error: message });
-  };
-
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
     this.routes = [];
@@ -133,14 +126,33 @@ export default class Nexar {
     await next();
   }
 
+  private errorHandler: ErrorHandler = (err, _req, res) => {
+    if (!res.writableEnded) res.status(err.status).json({ error: err.message });
+  };
+
+  private handleError(
+    e: unknown,
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    status = 500,
+    message = 'Internal Server Error',
+  ) {
+    const err =
+      e instanceof NexarError ? e : new NexarError(status, message, e);
+    logger.error(err.cause ?? err);
+    this.errorHandler(err, req, res);
+  }
+
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ) {
     const startTime = performance.now();
 
+    const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const pathname = url.pathname;
+
     req.query = Object.fromEntries(url.searchParams);
 
     res.on('finish', () => {
@@ -155,29 +167,17 @@ export default class Nexar {
         .map((m) => m.handler);
       await this.runStack(req, res, middlewares);
     } catch (e) {
-      const err =
-        e instanceof NexarError
-          ? e
-          : new NexarError(500, 'Internal Server Error', e);
-      logger.error(err.cause ?? err);
-      this.errorHandler(err, req, res);
+      this.handleError(e, req, res);
       return;
     }
     if (res.writableEnded) return;
-
-    const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
 
     // body parsing — skip for methods that don't carry a body
     if (!['GET', 'DELETE', 'HEAD'].includes(method)) {
       try {
         req.body = await this.parseBody(req);
       } catch (e) {
-        const err =
-          e instanceof NexarError
-            ? e
-            : new NexarError(400, 'Invalid request body', e);
-        logger.error(err.cause ?? err);
-        this.errorHandler(err, req, res);
+        this.handleError(e, req, res, 400, 'Invalid request body');
         return;
       }
     }
@@ -194,16 +194,9 @@ export default class Nexar {
       await this.runStack(req, res, match.route.handlers);
       if (!res.writableEnded) res.end();
     } catch (e) {
-      const err =
-        e instanceof NexarError
-          ? e
-          : new NexarError(500, 'Internal Server Error', e);
-      logger.error(err.cause ?? err);
-      this.errorHandler(err, req, res);
+      this.handleError(e, req, res);
     }
   }
-
-  // ─── Public API ─────────────────────────────────────────────────────────────
 
   use(handler: Middleware): this;
   use(prefix: `/${string}`, handler: Middleware): this;
@@ -216,11 +209,6 @@ export default class Nexar {
     } else {
       this.middlewares.push({ prefix: pathOrHandler, handler });
     }
-    return this;
-  }
-
-  onError(handler: ErrorHandler) {
-    this.errorHandler = handler;
     return this;
   }
 

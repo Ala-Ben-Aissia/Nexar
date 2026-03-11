@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { NexarError } from './index.js';
 
 export type BodyPayload =
   | Record<string, unknown> // application/json
@@ -69,7 +70,7 @@ type StoredMiddleware = {
 export type MiddlewareStack = Array<StoredMiddleware>;
 
 export type ErrorHandler = (
-  err: unknown,
+  err: NexarError,
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ) => void;
