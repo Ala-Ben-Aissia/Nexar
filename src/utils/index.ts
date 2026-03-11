@@ -197,3 +197,14 @@ export function matchRoute(
     ? { success: false, error: 'Method Not Allowed', code: 405 }
     : { success: false, error: 'Not Found', code: 404 };
 }
+
+export class NexarError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'NexarError';
+  }
+}

@@ -19,7 +19,7 @@ declare module 'node:http' {
   }
 }
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export type HttpMethod = 'HEAD' | 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export type RouteHandler<
   Params extends string = never,
@@ -67,3 +67,9 @@ type StoredMiddleware = {
 };
 
 export type MiddlewareStack = Array<StoredMiddleware>;
+
+export type ErrorHandler = (
+  err: unknown,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+) => void;

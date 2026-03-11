@@ -3,6 +3,7 @@ import {
   compilePath,
   detectContentType,
   matchRoute,
+  NexarError,
   safeWrite,
   validateJson,
   validateStatus,
@@ -10,6 +11,7 @@ import {
 import { logger } from './utils/logger.js';
 import {
   BodyPayload,
+  ErrorHandler,
   Middleware,
   MiddlewareStack,
   type ExtractParams,
@@ -53,6 +55,7 @@ proto.status = function (code: number) {
 proto.send = function (input: any) {
   if (input === undefined) return this;
   if (!this.getHeader('content-type')) {
+    // detect from output shape — trust request header as fallback for untagged binary
     const type = detectContentType(input, this.req);
     this.setHeader('content-type', type);
   }
@@ -70,6 +73,13 @@ export default class Nexar {
   private routes: Route[];
   private middlewares: MiddlewareStack;
 
+  private errorHandler: ErrorHandler = (err, _req, res) => {
+    const status = err instanceof NexarError ? err.status : 500;
+    const message =
+      err instanceof NexarError ? err.message : 'Internal Server Error';
+    if (!res.writableEnded) res.status(status).json({ error: message });
+  };
+
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
     this.routes = [];
@@ -86,8 +96,8 @@ export default class Nexar {
         if (contentType.includes('application/json')) {
           try {
             return resolve(JSON.parse(raw.toString('utf-8')));
-          } catch (e) {
-            return reject(new SyntaxError('Invalid JSON body'));
+          } catch {
+            return reject(new NexarError(400, 'Invalid JSON body'));
           }
         }
         if (contentType.includes('application/x-www-form-urlencoded')) {
@@ -98,10 +108,8 @@ export default class Nexar {
         if (contentType.includes('text/')) {
           return resolve(raw.toString('utf-8'));
         }
-
         return resolve(raw);
       });
-
       req.on('error', (err) => {
         logger.error(err);
         reject(err);
@@ -112,14 +120,14 @@ export default class Nexar {
   private async runStack(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    stack: Array<RouteHandler<any>>,
+    stack: RouteHandler<any>[],
   ) {
     let i = 0;
     const next = async () => {
       if (res.writableEnded) return;
       if (i < stack.length) {
-        const middleware = stack[i++];
-        await middleware(req, res, next);
+        const handler = stack[i++];
+        await handler(req, res, next);
       }
     };
     await next();
@@ -132,65 +140,70 @@ export default class Nexar {
     const startTime = performance.now();
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    req.query = Object.fromEntries(url.searchParams);
-
     const pathname = url.pathname;
-
-    try {
-      // global middlewares
-      const middlewares = this.middlewares
-        .filter((m) => pathname.startsWith(m.prefix))
-        .map((m) => m.handler);
-      await this.runStack(req, res, middlewares);
-    } catch (e) {
-      logger.error(e);
-      if (!res.writableEnded) {
-        res.status(500).json({ error: 'Internal Server Error' });
-      }
-      return;
-    }
-    if (res.writableEnded) return;
-
-    const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
-
-    if (!['GET', 'DELETE'].includes(method)) {
-      try {
-        req.body = await this.parseBody(req);
-      } catch (e) {
-        logger.error(e);
-        if (!res.writableEnded) {
-          res.status(400).json({ error: 'Invalid request body' });
-        }
-        return;
-      }
-    }
+    req.query = Object.fromEntries(url.searchParams);
 
     res.on('finish', () => {
       const duration = performance.now() - startTime;
       logger.request(method, pathname, res.statusCode, duration);
     });
 
-    const match = matchRoute(pathname, this.routes, method);
+    // global middleware
+    try {
+      const middlewares = this.middlewares
+        .filter((m) => pathname.startsWith(m.prefix))
+        .map((m) => m.handler);
+      await this.runStack(req, res, middlewares);
+    } catch (e) {
+      const err =
+        e instanceof NexarError
+          ? e
+          : new NexarError(500, 'Internal Server Error', e);
+      logger.error(err.cause ?? err);
+      this.errorHandler(err, req, res);
+      return;
+    }
+    if (res.writableEnded) return;
 
+    const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
+
+    // body parsing — skip for methods that don't carry a body
+    if (!['GET', 'DELETE', 'HEAD'].includes(method)) {
+      try {
+        req.body = await this.parseBody(req);
+      } catch (e) {
+        const err =
+          e instanceof NexarError
+            ? e
+            : new NexarError(400, 'Invalid request body', e);
+        logger.error(err.cause ?? err);
+        this.errorHandler(err, req, res);
+        return;
+      }
+    }
+
+    const match = matchRoute(pathname, this.routes, method);
     if (!match.success) {
       return res.status(match.code).json({ error: match.error });
     }
 
     req.params = match.params;
 
-    const handlers = match.route.handlers;
-
+    // per-route handlers + middleware
     try {
-      // per-route handlers
-      await this.runStack(req, res, handlers);
+      await this.runStack(req, res, match.route.handlers);
       if (!res.writableEnded) res.end();
     } catch (e) {
-      logger.error(e);
-      if (!res.writableEnded) {
-        res.status(500).json({ error: 'Internal Server Error' });
-      }
+      const err =
+        e instanceof NexarError
+          ? e
+          : new NexarError(500, 'Internal Server Error', e);
+      logger.error(err.cause ?? err);
+      this.errorHandler(err, req, res);
     }
   }
+
+  // ─── Public API ─────────────────────────────────────────────────────────────
 
   use(handler: Middleware): this;
   use(prefix: `/${string}`, handler: Middleware): this;
@@ -206,19 +219,18 @@ export default class Nexar {
     return this;
   }
 
+  onError(handler: ErrorHandler) {
+    this.errorHandler = handler;
+    return this;
+  }
+
   private pushRoute<Params extends string>(
     path: string,
     method: HttpMethod,
     handlers: RouteHandler<Params>[],
   ) {
     const { regex, paramNames } = compilePath<Params>(path);
-    this.routes.push({
-      method,
-      pattern: path,
-      regex,
-      paramNames,
-      handlers,
-    });
+    this.routes.push({ method, pattern: path, regex, paramNames, handlers });
   }
 
   get<Path extends string>(
