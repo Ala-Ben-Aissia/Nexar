@@ -55,3 +55,14 @@ export type Middleware = (
   res: http.ServerResponse,
   next: () => void | Promise<void>,
 ) => void | Promise<void>;
+
+type StoredMiddleware = {
+  prefix: string;
+  handler: (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    next: () => void | Promise<void>,
+  ) => void | Promise<void>;
+};
+
+export type MiddlewareStack = Array<StoredMiddleware>;

@@ -11,6 +11,7 @@ import { logger } from './utils/logger.js';
 import {
   BodyPayload,
   Middleware,
+  MiddlewareStack,
   type ExtractParams,
   type HttpMethod,
   type Route,
@@ -67,7 +68,7 @@ proto.send = function (input: any) {
 export default class Nexar {
   private server: http.Server;
   private routes: Route[];
-  private middlewares: Middleware[];
+  private middlewares: MiddlewareStack;
 
   constructor() {
     this.server = http.createServer(this.handleRequest.bind(this));
@@ -111,13 +112,17 @@ export default class Nexar {
   private async runMiddlewares(
     req: http.IncomingMessage,
     res: http.ServerResponse,
+    pathname: string,
   ) {
     let i = 0;
+    const matched = this.middlewares.filter((mw) =>
+      pathname.startsWith(mw.prefix),
+    );
     const next = async () => {
       if (res.writableEnded) return;
-      if (i < this.middlewares.length) {
-        const mw = this.middlewares[i++];
-        await mw(req, res, next);
+      if (i < matched.length) {
+        const mw = matched[i++];
+        await mw.handler(req, res, next);
       }
     };
     await next();
@@ -129,8 +134,13 @@ export default class Nexar {
   ) {
     const startTime = performance.now();
 
+    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+    req.query = Object.fromEntries(url.searchParams);
+
+    const pathname = url.pathname;
+
     try {
-      await this.runMiddlewares(req, res);
+      await this.runMiddlewares(req, res, pathname);
     } catch (e) {
       logger.error(e);
       if (!res.writableEnded) {
@@ -140,10 +150,6 @@ export default class Nexar {
     }
     if (res.writableEnded) return;
 
-    const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    req.query = Object.fromEntries(url.searchParams);
-
-    const pathname = url.pathname;
     const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
 
     if (!['GET', 'DELETE'].includes(method)) {
@@ -184,8 +190,17 @@ export default class Nexar {
     }
   }
 
-  use(mw: Middleware) {
-    this.middlewares.push(mw);
+  use(handler: Middleware): this;
+  use(prefix: `/${string}`, handler: Middleware): this;
+  use(
+    pathOrHandler: `/${string}` | Middleware,
+    handler: Middleware = () => {},
+  ) {
+    if (typeof pathOrHandler === 'function') {
+      this.middlewares.push({ prefix: '/', handler: pathOrHandler });
+    } else {
+      this.middlewares.push({ prefix: pathOrHandler, handler });
+    }
     return this;
   }
 
