@@ -43,10 +43,7 @@ proto.json = function (input: unknown) {
 proto.status = function (code: number) {
   const { error } = validateStatus(code);
   if (error) {
-    logger.error(error);
-    this.statusCode = 400;
-    this.setHeader('content-type', 'application/json; charset=utf-8');
-    return this.end(stringifyError(error));
+    throw error;
   }
   this.statusCode = code;
   return this;
@@ -97,6 +94,7 @@ export default class Nexar {
       req.on('data', (chunk) => {
         size += chunk.length;
         if (size > MAX_BODY) {
+          req.pause(); // stop buffering...
           return reject(new NexarError(413, 'Payload too large'));
         }
         chunks.push(chunk);
@@ -139,16 +137,19 @@ export default class Nexar {
     stack: RouteHandler<any>[],
   ) {
     let index = -1;
-    const dispatch = async (i: number) => {
+    const dispatch = async (i: number): Promise<void> => {
       if (i <= index) {
-        throw new NexarError(
-          500,
-          `next() called multiple times in handler at position ${index}`,
+        return this.handleError(
+          new Error(
+            `next() called multiple times in handler at position ${index}`,
+          ),
+          req,
+          res,
         );
       }
       index = i;
       if (i === stack.length) return;
-      await stack[i](req, res, () => dispatch(i + 1));
+      await stack[i](req, res, async () => await dispatch(i + 1));
     };
     await dispatch(0);
   }
@@ -184,6 +185,7 @@ export default class Nexar {
     req.query = Object.fromEntries(url.searchParams);
 
     res.on('finish', () => {
+      req.destroy(); // stop TCP stream
       const duration = performance.now() - startTime;
       logger.request(method, pathname, res.statusCode, duration);
     });

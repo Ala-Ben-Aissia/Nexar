@@ -73,7 +73,20 @@ export const logger = {
    * catch (e) { logger.error(e) }
    */
   error(e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error(color.red(color.bold('✗ Error')) + ' ' + message);
+    const isError = e instanceof Error;
+    const message = isError ? e.message : String(e);
+    const name = isError ? e.name : 'Error';
+    const stack =
+      isError && e.stack
+        ? color.gray('\n' + e.stack.split('\n').slice(1).join('\n'))
+        : '';
+    const cause =
+      isError && e.cause !== undefined
+        ? color.gray('\nCaused by: ') + String(e.cause)
+        : '';
+
+    console.error(
+      color.red(color.bold(`✗ ${name}`)) + ' ' + message + cause + stack,
+    );
   },
 };
