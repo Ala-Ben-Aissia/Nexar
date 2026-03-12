@@ -138,15 +138,19 @@ export default class Nexar {
     res: http.ServerResponse,
     stack: RouteHandler<any>[],
   ) {
-    let i = 0;
-    const next = async () => {
-      if (res.writableEnded) return;
-      if (i < stack.length) {
-        const handler = stack[i++];
-        await handler(req, res, next);
+    let index = -1;
+    const dispatch = async (i: number) => {
+      if (i <= index) {
+        throw new NexarError(
+          500,
+          `next() called multiple times in handler at position ${index}`,
+        );
       }
+      index = i;
+      if (i === stack.length) return;
+      await stack[i](req, res, () => dispatch(i + 1));
     };
-    await next();
+    await dispatch(0);
   }
 
   private errorHandler: ErrorHandler = (err, _req, res) => {
@@ -184,6 +188,14 @@ export default class Nexar {
       logger.request(method, pathname, res.statusCode, duration);
     });
 
+    if (method === 'OPTIONS') {
+      const allowed = this.routes
+        .filter((r) => r.regex.test(pathname))
+        .map((r) => r.method);
+      res.setHeader('Allow', [...new Set(allowed)].join(', '));
+      return res.status(204).end();
+    }
+
     // global middleware
     let stack: RouteHandler[] = [];
 
@@ -208,11 +220,6 @@ export default class Nexar {
         this.handleError(e, req, res, 400, 'Invalid request body');
         return;
       }
-    }
-
-    if (method === 'OPTIONS') {
-      res.setHeader('allow', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      return res.status(204).end();
     }
 
     const matchMethod = method === 'HEAD' ? 'GET' : method;
