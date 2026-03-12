@@ -1,3 +1,6 @@
+import { IncomingMessage } from 'node:http';
+import { HttpMethod } from './types.js';
+
 export const color = {
   // modifiers
   bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
@@ -23,8 +26,18 @@ const METHOD_COLORS: Record<string, (s: string) => string> = {
   DELETE: color.red, // destructive → red
 };
 
-function colorMethod(method: string): string {
+export function colorMethod(method: string): string {
   return (METHOD_COLORS[method] ?? color.gray)(method);
+}
+
+export function extractRequestInfo(req: IncomingMessage) {
+  const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
+  const host = req.headers.host ?? 'localhost';
+  const url = new URL(req.url ?? '/', `http://${host}`);
+  const pathname = url.pathname;
+  const query = Object.fromEntries(url.searchParams);
+
+  return { method, pathname, query };
 }
 
 function colorStatus(code: number): string {

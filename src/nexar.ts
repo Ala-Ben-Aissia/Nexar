@@ -8,7 +8,7 @@ import {
   validateJson,
   validateStatus,
 } from './utils/index.js';
-import { logger } from './utils/logger.js';
+import { colorMethod, extractRequestInfo, logger } from './utils/logger.js';
 import {
   BodyPayload,
   ErrorHandler,
@@ -141,7 +141,7 @@ export default class Nexar {
       if (i <= index) {
         return this.handleError(
           new Error(
-            `next() called multiple times in handler at position ${index}`,
+            `next() called multiple times in handler (${colorMethod(req.method ?? 'GET')} ${req.url}) at position ${index}`,
           ),
           req,
           res,
@@ -177,12 +177,9 @@ export default class Nexar {
   ) {
     const startTime = performance.now();
 
-    const method = (req.method ?? 'GET').toUpperCase() as HttpMethod;
-    const host = req.headers.host ?? 'localhost';
-    const url = new URL(req.url ?? '/', `http://${host}`);
-    const pathname = url.pathname;
+    const { method, pathname, query } = extractRequestInfo(req);
 
-    req.query = Object.fromEntries(url.searchParams);
+    req.query = query;
 
     res.on('finish', () => {
       req.destroy(); // stop TCP stream
